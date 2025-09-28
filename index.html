@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>ESP Dashboard (Firebase)</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#0b0c10; color:#eee; padding:20px; }
+    .device { background:#111; padding:15px; margin:10px 0; border-radius:8px; }
+    button { margin:5px; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; }
+    .forward{background:#2ecc71;color:#012;}
+    .back{background:#e74c3c;color:#fff}
+    .left{background:#3498db;color:#fff}
+    .right{background:#f39c12;color:#fff}
+    .stop{background:#95a5a6;color:#fff}
+    pre{background:#000;padding:10px;border-radius:6px;overflow:auto}
+  </style>
+</head>
+<body>
+  <h1>ESP Dashboard (Firebase)</h1>
+  <div id="devices"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+
+  <script>
+    // ===== config (from you) =====
+    const firebaseConfig = {
+      apiKey: "AIzaSyCTC4ZagU4DxIAqh-gETgnSS2T1sV9QQ7o",
+      authDomain: "oil-boat-default.firebaseapp.com",
+      databaseURL: "https://oil-boat-default-rtdb.firebaseio.com/",
+      projectId: "oil-boat-default",
+      storageBucket: "oil-boat-default.appspot.com",
+      messagingSenderId: "XXXX",
+      appId: "1:XXXX:web:XXXX"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const devicesDiv = document.getElementById('devices');
+
+    // Listen to all devices node
+    const devicesRef = db.ref('/devices');
+    devicesRef.on('value', (snap) => {
+      const all = snap.val() || {};
+      renderDevices(all);
+    });
+
+    function renderDevices(devs) {
+      devicesDiv.innerHTML = '';
+      const keys = Object.keys(devs);
+      if (!keys.length) {
+        devicesDiv.innerHTML = '<p>No devices found yet. Make sure your ESP is connected.</p>';
+        return;
+      }
+      keys.forEach(mac => {
+        const dev = devs[mac];
+        const latest = dev.latest || {};
+        const html = `
+          <div class="device">
+            <h3>Device: ${mac}</h3>
+            <p><b>RSSI:</b> ${latest.wifi_rssi ?? '--' } dBm</p>
+            <p><b>Turbidity:</b> ${latest.turbidity ?? '--'}%</p>
+            <p><b>MQ135:</b> ${latest.mq135 ?? '--'}%</p>
+            <p><b>Digital:</b> ${latest.digital_sensor ? 'ACTIVE':'INACTIVE'}</p>
+            <p><b>Last ts:</b> ${latest.timestamp ? new Date(latest.timestamp).toLocaleString() : '--'}</p>
+            <div>
+              <button class="forward" onclick="sendCmd('${mac}','forward')">Forward</button>
+              <button class="left" onclick="sendCmd('${mac}','left')">Left</button>
+              <button class="right" onclick="sendCmd('${mac}','right')">Right</button>
+              <button class="back" onclick="sendCmd('${mac}','back')">Back</button>
+              <button class="stop" onclick="sendCmd('${mac}','stop')">Stop</button>
+            </div>
+            <details><summary>Raw device data</summary><pre>${JSON.stringify(dev, null, 2)}</pre></details>
+          </div>
+        `;
+        devicesDiv.innerHTML += html;
+      });
+    }
+
+    function sendCmd(mac, cmd) {
+      const path = '/devices/' + mac + '/command';
+      db.ref(path).set(cmd)
+        .then(()=> alert('Command sent: ' + cmd))
+        .catch(err => alert('Error: ' + err));
+    }
+  </script>
+</body>
+</html>
