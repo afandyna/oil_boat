@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Boat Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#0b0c10; color:#eee; padding:20px; }
+    .device { background:#111; padding:15px; margin:10px 0; border-radius:8px; }
+    button { margin:5px; padding:8px 12px; border-radius:6px; border:none; cursor:pointer; }
+    .forward { background:#2ecc71; color:#012; }
+    .back { background:#e74c3c; color:#fff; }
+    .left { background:#3498db; color:#fff; }
+    .right { background:#f39c12; color:#fff; }
+    .stop { background:#95a5a6; color:#fff; }
+    .active { border: 2px solid #00ff00; box-shadow: 0 0 10px #00ff00; transform: scale(1.1); }
+    #activeCmd { font-weight: bold; color: #00ff00; }
+    .gps-error { color: #ff4444; font-style: italic; }
+    .digital-active { color: #ff0000; font-weight: bold; }
+    .digital-active::before { content: "🔴 "; }
+    .gauge { width: 150px; height: 150px; display: inline-block; margin: 10px; }
+  </style>
+</head>
+<body>
+  <h1>🚤 Boat Dashboard</h1>
+  <div id="data"></div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/justgage/1.4.0/justgage.min.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCTC4ZagU4DxIAqh-gETgnSS2T1sV9QQ7o",
+      authDomain: "oil-boat-default.firebaseapp.com",
+      databaseURL: "https://oil-boat-default-rtdb.firebaseio.com/",
+      projectId: "oil-boat-default",
+      storageBucket: "oil-boat-default.appspot.com",
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const DEVICE_ID = "device001";
+    const dataDiv = document.getElementById("data");
+    let activeButton = null;
+    let mqGauge, turbGauge;
+
+    // قراءة البيانات من Firebase
+    db.ref(`/devices/${DEVICE_ID}/latest`).on("value", (snap) => {
+      const d = snap.val();
+      if (!d) {
+        dataDiv.innerHTML = "<p>No data yet...</p>";
+        return;
+      }
+      const lat = d.LAT ?? '--';
+      const lon = d.LON ?? '--';
+      const mapUrl = lat !== '--' && lon !== '--' && lat !== '0.000000' && lon !== '0.000000' 
+        ? `https://www.google.com/maps?q=${lat},${lon}` 
+        : "#";
+
+      dataDiv.innerHTML = `
+        <div class="device">
+          <h2>Device: ${DEVICE_ID}</h2>
+          <div id="mqGauge" class="gauge"></div>
+          <div id="turbGauge" class="gauge"></div>
+          <p><b>Digital Sensor:</b> <span id="digitalStatus">${d.DIGITAL ? '<span class="digital-active">Active</span>' : 'Inactive'}</span></p>
+          <p><b>Latitude:</b> ${lat !== '--' ? lat : '<span class="gps-error">No GPS signal</span>'}</p>
+          <p><b>Longitude:</b> ${lon !== '--' ? lon : '<span class="gps-error">No GPS signal</span>'}</p>
+          <p><b>Map:</b> <a href="${mapUrl}" target="_blank">${lat !== '--' && lon !== '--' ? 'Open in Google Maps' : 'No GPS data'}</a></p>
+          <p><b>Active Command:</b> <span id="activeCmd">None</span></p>
+          <div>
+            <button id="forwardBtn" class="forward" onclick="sendCmd('forward')">Forward</button>
+            <button id="backBtn" class="back" onclick="sendCmd('back')">Back</button>
+            <button id="leftBtn" class="left" onclick="sendCmd('left')">Left</button>
+            <button id="rightBtn" class="right" onclick="sendCmd('right')">Right</button>
+            <button id="stopBtn" class="stop" onclick="sendCmd('stop')">Stop</button>
+          </div>
+        </div>
+      `;
+
+      // تحديث العدادات
+      if (!mqGauge) {
+        mqGauge = new JustGage({
+          id: "mqGauge",
+          value: d.MQ135 ?? 0,
+          min: 0,
+          max: 100,
+          title: "MQ135 (%)",
+          label: "Air Quality",
+          levelColors: ["#ff0000", "#f9c802", "#00ff00"],
+          gaugeWidthScale: 0.6
+        });
+      } else {
+        mqGauge.refresh(d.MQ135 ?? 0);
+      }
+      if (!turbGauge) {
+        turbGauge = new JustGage({
+          id: "turbGauge",
+          value: d.TURBIDITY ?? 0,
+          min: 0,
+          max: 100,
+          title: "Turbidity (%)",
+          label: "Water Clarity",
+          levelColors: ["#ff0000", "#f9c802", "#00ff00"],
+          gaugeWidthScale: 0.6
+        });
+      } else {
+        turbGauge.refresh(d.TURBIDITY ?? 0);
+      }
+    });
+
+    // مراقبة الأمر النشط
+    db.ref(`/devices/${DEVICE_ID}/command`).on("value", (snap) => {
+      const cmd = snap.val() || "None";
+      const activeCmdSpan = document.getElementById("activeCmd");
+      if (activeCmdSpan) activeCmdSpan.textContent = cmd.charAt(0).toUpperCase() + cmd.slice(1);
+
+      if (activeButton) activeButton.classList.remove("active");
+      const btnMap = {
+        "forward": "forwardBtn",
+        "back": "backBtn",
+        "left": "leftBtn",
+        "right": "rightBtn",
+        "stop": "stopBtn"
+      };
+      if (cmd && btnMap[cmd]) {
+        activeButton = document.getElementById(btnMap[cmd]);
+        if (activeButton) activeButton.classList.add("active");
+      }
+    });
+
+    // إرسال الأمر إلى Firebase
+    function sendCmd(cmd) {
+      db.ref(`/devices/${DEVICE_ID}/command`).set(cmd)
+        .then(() => console.log("✅ Command sent:", cmd))
+        .catch(err => console.error("❌ Firebase error:", err));
+    }
+  </script>
+</body>
+</html>
